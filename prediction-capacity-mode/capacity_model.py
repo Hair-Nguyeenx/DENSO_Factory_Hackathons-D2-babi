@@ -159,7 +159,7 @@ class CapacityModelEngine:
         #Mức 1. Dàn trải phẳng
         if b_type == 'inbound':
             #tính số hàng có thể dàn trải được 
-            shift_w = int(candidate_df.loc[t_idx]['workload_inbound']* 0.25)
+            shift_w = int(candidate_df.iloc[t_idx]['workload_inbound']* 0.25)
             test_df = candidate_df.copy()
             prev_time = test_df.index[t_idx - 1]
             test_df.loc[curr_time, 'workload_inbound'] = float(test_df.loc[curr_time, 'workload_inbound']) - shift_w
