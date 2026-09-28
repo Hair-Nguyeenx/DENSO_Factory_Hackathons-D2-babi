@@ -181,7 +181,7 @@ class CapacityModelEngine:
             shift_w = int(candidate_df.iloc[t_idx]['workload_inbound'] * 0.20)
 
             # --- LEVEL 1: HEIJUNKA ĐƠN LẺ (Dời sớm 1h hoặc 2h) ---
-            for offset in [-1, -2, 1]:
+            for offset in [-1, -2]:
                 target_idx = t_idx + offset
                 if 0 <= target_idx < n_steps and shift_w > 0:
                     test_df = candidate_df.copy()
