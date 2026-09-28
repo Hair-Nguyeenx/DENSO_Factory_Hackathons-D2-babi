@@ -34,14 +34,14 @@ class CapacityModelEngine:
         
         for idx in range(len(df_sim)):
             row = df_sim.iloc[idx]
-            w_in = row['workload_inbound']
-            w_out = row['workload_outbound']
-            labor_in = row['labor_inbound']
-            labor_out = row['labor_outbound']
-            amr = row['amr_active']
-            labor_buf = row['labor_buffer'] if 'labor_buffer' in row else 0
+            w_in = float(row['workload_inbound'])
+            w_out = float(row['workload_outbound'])
+            labor_in = float(row['labor_inbound'])
+            labor_out = float(row['labor_outbound'])
+            amr = float(row['amr_active'])
+            labor_buf = float(row['labor_buffer']) if 'labor_buffer' in row else 0.0
             
-            # Lấy giờ thực tế nếu index là datetime, ngược lại lấy index thô
+            # Lấy giờ thực tế 
             hour = df_sim.index[idx].hour if hasattr(df_sim.index[idx], 'hour') else idx % 24
             
             # Kho 1: Kho inbound 
@@ -73,9 +73,9 @@ class CapacityModelEngine:
             s_inbound = min(s_inbound, SOFT_CAP_IN)
             s_buffer = min(s_buffer, SOFT_CAP_BUF)
             s_outbound = min(s_outbound, SOFT_CAP_OUT)
-            simulating_storage_inbound.append(s_inbound)
-            simulating_storage_buffer.append(s_buffer)
-            simulating_storage_outbound.append(s_outbound)
+            simulating_storage_inbound.append(round(s_inbound, 1))
+            simulating_storage_buffer.append(round(s_buffer, 1))
+            simulating_storage_outbound.append(round(s_outbound, 1))
             
         df_sim['storage_inbound_sim'] = simulating_storage_inbound
         df_sim['storage_buffer_sim'] = simulating_storage_buffer
@@ -158,29 +158,29 @@ class CapacityModelEngine:
         """
         #Mức 1. Dàn trải phẳng
         if b_type == 'inbound':
-            #tính số hàng có thể dàn trải được 
-            shift_w = int(candidate_df.iloc[t_idx]['workload_inbound']* 0.25)
-            test_df = candidate_df.copy()
-            prev_time = test_df.index[t_idx - 1]
-            test_df.loc[curr_time, 'workload_inbound'] = float(test_df.loc[curr_time, 'workload_inbound']) - shift_w
-            test_df.loc[prev_time, 'workload_inbound'] = float(test_df.loc[prev_time, 'workload_inbound']) + shift_w
-
-            is_better, df_after = self.evaluate_plan(test_df,initial_stocks, df_plan_bottleneck)
-            if is_better:
-                    return {
-                        'status': 'SUCCESS',
-                        'level': ' Dàn trải khối lượng việc',
-                        'action_logs': [f"Hẹn nhà xe dời {shift_w} pallets Inbound từ lúc {hour_str} lên sớm 1 tiếng."],
-                        'cost': 0,
-                        'df_before': df_plan_simulation,
-                        'df_after': df_after
-                    }
+                #tính số hàng có thể dàn trải được 
+                shift_w = int(candidate_df.iloc[t_idx]['workload_inbound']* 0.2)
+                test_df = candidate_df.copy()
+                prev_time = test_df.index[t_idx - 1]
+                test_df.loc[curr_time, 'workload_inbound'] = float(test_df.loc[curr_time, 'workload_inbound']) - shift_w
+                test_df.loc[prev_time, 'workload_inbound'] = float(test_df.loc[prev_time, 'workload_inbound']) + shift_w
+    
+                is_better, df_after = self.evaluate_plan(test_df,initial_stocks, df_plan_bottleneck)
+                if is_better:
+                        return {
+                            'status': 'SUCCESS',
+                            'level': ' Dàn trải khối lượng việc',
+                            'action_logs': [f"Hẹn nhà xe dời {shift_w} pallets Inbound từ lúc {hour_str} lên sớm 1 tiếng."],
+                            'cost': 0,
+                            'df_before': df_plan_simulation,
+                            'df_after': df_after
+                        }
 
         
         #Mức 2: Đổi ca/Điều chuyển nội bộ
         if b_type == "inbound":
             labor_outbound = test_df.iloc[t_idx]['labor_outbound']
-
+            
             #Kiểm tra xem có thể lấy labor outbound sang giúp labor inbound được không
             if labor_outbound >= 3:
                 for i in range(1,3):
