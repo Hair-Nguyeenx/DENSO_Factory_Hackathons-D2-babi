@@ -63,7 +63,7 @@ theme_choice = st.sidebar.radio(
     "Chế độ giao diện (Theme)",
     options=["🌙 Giao diện Tối (Dark)", "☀️ Giao diện Sáng (Light)"],
     index=0
-)
+) 
 is_light = "Sáng" in theme_choice
 
 st.sidebar.markdown("---")

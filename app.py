@@ -8,3 +8,4 @@ from pathlib import Path
 
 control_room_path = Path(__file__).resolve().parent / "control-room" / "app.py"
 runpy.run_path(str(control_room_path), run_name="__main__")
+ 
