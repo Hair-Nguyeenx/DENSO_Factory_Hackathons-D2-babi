@@ -511,7 +511,7 @@ if __name__ == "__main__":
         capacity_in = labor_in * RATE_LABOR_INBOUND
         available_in = s_inbound + w_in
         space_in_buffer = max(0, MAX_STORAGE_BUFFER - s_buffer)
-        flow_in = int(min(available_in * 0.6, capacity_in, space_in_buffer))
+        flow_in = (min(available_in * 0.6, capacity_in, space_in_buffer))
 
         # Kho 2: Kho Buffer
         amr_capacity = amr * RATE_AMR
