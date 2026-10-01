@@ -187,8 +187,8 @@ class WarehouseForecaster:
         # 1. Single EMA phản ứng tức thời (Kèm kẹp biên an toàn chống nổ bias)
         new_bias_in = 0.40 * err_in + 0.60 * self.bias_1h_in
         new_bias_out = 0.40 * err_out + 0.60 * self.bias_1h_out
-        self.bias_1h_in = int(np.clip(new_bias_in, -35.0, 35.0))
-        self.bias_1h_out = int(np.clip(new_bias_out, -35.0, 35.0))
+        self.bias_1h_in = float(np.clip(new_bias_in, -35.0, 35.0))
+        self.bias_1h_out = float(np.clip(new_bias_out, -35.0, 35.0))
 
         # 2. Lịch sử sai số gần nhất
         self.error_history_in.append(err_in)
@@ -200,8 +200,8 @@ class WarehouseForecaster:
         # 3. Shift Bias theo từng ca làm việc (Có kẹp biên chống đột biến ảo)
         new_sb_in = 0.35 * err_in + 0.65 * self.shift_bias_in[shift_b]
         new_sb_out = 0.35 * err_out + 0.65 * self.shift_bias_out[shift_b]
-        self.shift_bias_in[shift_b] = int(np.clip(new_sb_in, -25.0, 25.0))
-        self.shift_bias_out[shift_b] = int(np.clip(new_sb_out, -25.0, 25.0))
+        self.shift_bias_in[shift_b] = float(np.clip(new_sb_in, -25.0, 25.0))
+        self.shift_bias_out[shift_b] = float(np.clip(new_sb_out, -25.0, 25.0))
 
     def _build_single_feature(self, target_col, target_time, y_history=None):
         if y_history is None:
@@ -485,9 +485,9 @@ if __name__ == "__main__":
     # 2. Mô phỏng dòng chảy 3 kho (Chuẩn 100% logic gốc)
     print("\n[2/3] Đang mô phỏng dòng chảy kho và xuất 5 bảng CSV...")
     df_2027 = df.loc[common_idx].copy()
-    s_inbound = int(df.loc['2026', 'storage_inbound'].iloc[-1])
-    s_buffer = int(df.loc['2026', 'storage_buffer'].iloc[-1])
-    s_outbound = int(df.loc['2026', 'storage_outbound'].iloc[-1])
+    s_inbound = float(df.loc['2026', 'storage_inbound'].iloc[-1])
+    s_buffer = float(df.loc['2026', 'storage_buffer'].iloc[-1])
+    s_outbound = float(df.loc['2026', 'storage_outbound'].iloc[-1])
 
     simulating_storage_inbound = []
     simulating_storage_buffer = []
