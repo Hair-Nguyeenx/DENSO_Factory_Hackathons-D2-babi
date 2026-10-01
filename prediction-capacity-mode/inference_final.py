@@ -1,3 +1,4 @@
+import os
 import numpy as np 
 import pandas as pd 
 import joblib
@@ -6,9 +7,24 @@ import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 
-# ==============================================================================
-# 0. HẰNG SỐ & ĐỊNH MỨC NĂNG LỰC (ĐỒNG BỘ 100% VỚI CAPACITY_MODEL.PY)
-# ==============================================================================
+# Tự động định vị thư mục chứa file code hiện tại để không bao giờ bị lỗi 'No such file or directory'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def resolve_path(filename):
+    if os.path.isabs(filename) and os.path.exists(filename):
+        return filename
+    if os.path.exists(filename):
+        return filename
+    p_base = os.path.join(BASE_DIR, filename)
+    if os.path.exists(p_base):
+        return p_base
+    p_parent = os.path.join(os.path.dirname(BASE_DIR), filename)
+    if os.path.exists(p_parent):
+        return p_parent
+    return p_base
+
+#  HẰNG SỐ & ĐỊNH MỨC NĂNG LỰC (ĐỒNG BỘ 100% VỚI CAPACITY_MODEL.PY)
+
 RATE_LABOR_INBOUND = 15.0   # pallets / người / giờ
 RATE_LABOR_OUTBOUND = 15.0  # pallets / người / giờ 
 RATE_AMR = 14.0             # pallets / xe / giờ
@@ -19,11 +35,11 @@ MAX_STORAGE_OUTBOUND = 300
 
 WARN_STORAGE_INBOUND = MAX_STORAGE_INBOUND * 0.8   # 160
 WARN_STORAGE_BUFFER = MAX_STORAGE_BUFFER * 0.8     # 400
-WARN_STORAGE_OUTBOUND = MAX_STORAGE_OUTBOUND * 0.9  # 270
+WARN_STORAGE_OUTBOUND = MAX_STORAGE_OUTBOUND * 0.8  # 240 (Đồng bộ chuẩn 80% với capacity_model)
 
-# ==============================================================================
-# 1. HÀM TẠO FEATURE (CHUẨN THEO ĐỊNH HƯỚNG GỐC CỦA BẠN)
-# ==============================================================================
+
+#  HÀM TẠO FEATURE (CHUẨN THEO ĐỊNH HƯỚNG GỐC CỦA BẠN)
+
 def get_shift_code(hour):
     if hour >= 20 or hour <= 5: return 0
     if hour in [6, 7]: return 1
@@ -70,9 +86,9 @@ def workload_lag_feature(df, target_cols):
     return feature
 
 
-# ==============================================================================
-# 2. CƠ CHẾ SỬA SAI THỜI GIAN THỰC CHO 1H (CODE GỐC)
-# ==============================================================================
+
+#  CƠ CHẾ SỬA SAI THỜI GIAN THỰC CHO 1H (CODE GỐC)
+
 def adaptive_prediction_in_real_time(model, X_test, y_test, alpha=0.35):
     raw_preds = model.predict(X_test)
     adapted_preds = []
@@ -91,9 +107,9 @@ def adaptive_prediction_in_real_time(model, X_test, y_test, alpha=0.35):
     return pd.Series(adapted_preds, index=X_test.index)
 
 
-# ==============================================================================
-# 3. CLASS DỰ BÁO CHO CONTROL ROOM (ĐẦY ĐỦ 3 NÚT: 1H / 3H / 12H VÀ CAPACITY MODEL)
-# ==============================================================================
+
+# CLASS DỰ BÁO CHO CONTROL ROOM (ĐẦY ĐỦ 3 NÚT: 1H / 3H / 12H VÀ CAPACITY MODEL)
+
 class WarehouseForecaster:
     """
     Module dự báo đa khung giờ phục vụ Control Room:
@@ -103,14 +119,15 @@ class WarehouseForecaster:
       - Khớp nối trực tiếp: get_plan_for_capacity_model(...)
     """
     def __init__(self, data_path="denso_logistics_simulation_test.csv"):
-        self.df = pd.read_csv(data_path)
+        actual_data_path = resolve_path(data_path)
+        self.df = pd.read_csv(actual_data_path)
         self.df['timestamp'] = pd.to_datetime(self.df['timestamp'])
         self.df.set_index('timestamp', inplace=True)
         self.df = self.df.asfreq('h')
 
-        self.model_inbound = joblib.load('model_inbound.pkl')
-        self.model_outbound = joblib.load('model_outbound.pkl')
-        self.feature_cols_dict = joblib.load('model_features.pkl')
+        self.model_inbound = joblib.load(resolve_path('model_inbound.pkl'))
+        self.model_outbound = joblib.load(resolve_path('model_outbound.pkl'))
+        self.feature_cols_dict = joblib.load(resolve_path('model_features.pkl'))
 
         # Bộ nhớ sai số thích ứng (Adaptive Trackers)
         self.bias_1h_in = 0.0
@@ -125,15 +142,37 @@ class WarehouseForecaster:
         self.std_in = train_2026.groupby(train_2026.index.hour)['workload_inbound'].std()
         self.std_out = train_2026.groupby(train_2026.index.hour)['workload_outbound'].std()
 
-    def update_actual_at_hour(self, current_time):
+    def sync_bias_up_to(self, current_time, warmup_hours=48):
         """
-        Cập nhật sai số thực tế khi vừa bước qua một mốc giờ mới
+        Tự động đồng bộ hóa bộ nhớ sai số thích ứng (Online Adaptive Bias)
+        từ các giờ thực tế gần nhất trước current_time.
+        Giúp mô hình nhận diện ngay lập tức khi bước vào đợt Volume Spike (+60%)
+        và cộng bù bias vào tương lai, đẩy dự báo lên 120-160 pallets/h.
+        """
+        self.bias_1h_in = 0.0
+        self.bias_1h_out = 0.0
+        self.error_history_in = []
+        self.error_history_out = []
+        self.shift_bias_in = {b: 0.0 for b in range(6)}
+        self.shift_bias_out = {b: 0.0 for b in range(6)}
+
+        start_warmup = max(self.df.index[168], current_time - pd.Timedelta(hours=warmup_hours))
+        for t in pd.date_range(start_warmup, current_time, freq='h'):
+            self.update_actual_at_hour(t)
+
+    def update_actual_at_hour(self, current_time, intervention_delta_in=0.0, intervention_delta_out=0.0):
+        """
+        Cập nhật sai số thực tế khi vừa bước qua một mốc giờ mới.
+        - intervention_delta_in/out: Lượng hàng dời do con người can thiệp (Heijunka).
+        - TÁCH BIỆT DỮ LIỆU: Phải trừ đi lượng can thiệp này để mô hình chỉ học sai số dòng chảy tự nhiên,
+          tránh hiện tượng bias tăng vọt bất thường (feedback confounding).
         """
         if current_time not in self.df.index:
             return
 
-        act_in = self.df.loc[current_time, 'workload_inbound']
-        act_out = self.df.loc[current_time, 'workload_outbound']
+        # Nhu cầu thực tế tự nhiên (đã bóc tách can thiệp Heijunka)
+        act_in = float(self.df.loc[current_time, 'workload_inbound']) - intervention_delta_in
+        act_out = float(self.df.loc[current_time, 'workload_outbound']) - intervention_delta_out
         shift_b = get_shift_code(current_time.hour)
 
         feat_in = self._build_single_feature('workload_inbound', current_time)
@@ -145,20 +184,24 @@ class WarehouseForecaster:
         err_in = act_in - raw_in
         err_out = act_out - raw_out
 
-        # 1. Single EMA cho nút 1h
-        self.bias_1h_in = 0.35 * err_in + 0.65 * self.bias_1h_in
-        self.bias_1h_out = 0.35 * err_out + 0.65 * self.bias_1h_out
+        # 1. Single EMA phản ứng tức thời (Kèm kẹp biên an toàn chống nổ bias)
+        new_bias_in = 0.40 * err_in + 0.60 * self.bias_1h_in
+        new_bias_out = 0.40 * err_out + 0.60 * self.bias_1h_out
+        self.bias_1h_in = float(np.clip(new_bias_in, -35.0, 35.0))
+        self.bias_1h_out = float(np.clip(new_bias_out, -35.0, 35.0))
 
-        # 2. Window Mean cho nút 3h
+        # 2. Lịch sử sai số gần nhất
         self.error_history_in.append(err_in)
         self.error_history_out.append(err_out)
         if len(self.error_history_in) > 24:
             self.error_history_in.pop(0)
             self.error_history_out.pop(0)
 
-        # 3. Shift Bias cho nút 12h
-        self.shift_bias_in[shift_b] = 0.25 * err_in + 0.75 * self.shift_bias_in[shift_b]
-        self.shift_bias_out[shift_b] = 0.25 * err_out + 0.75 * self.shift_bias_out[shift_b]
+        # 3. Shift Bias theo từng ca làm việc (Có kẹp biên chống đột biến ảo)
+        new_sb_in = 0.35 * err_in + 0.65 * self.shift_bias_in[shift_b]
+        new_sb_out = 0.35 * err_out + 0.65 * self.shift_bias_out[shift_b]
+        self.shift_bias_in[shift_b] = float(np.clip(new_sb_in, -25.0, 25.0))
+        self.shift_bias_out[shift_b] = float(np.clip(new_sb_out, -25.0, 25.0))
 
     def _build_single_feature(self, target_col, target_time, y_history=None):
         if y_history is None:
@@ -174,11 +217,19 @@ class WarehouseForecaster:
         rm6 = y_s.iloc[-6:].mean()
         hour = target_time.hour
 
+        n = len(y_s)
+        lag_4 = y_s.iloc[-4] if n >= 4 else y_s.iloc[0]
+        lag_12 = y_s.iloc[-12] if n >= 12 else y_s.iloc[0]
+        lag_18 = y_s.iloc[-18] if n >= 18 else y_s.iloc[0]
+        lag_24 = y_s.iloc[-24] if n >= 24 else y_s.iloc[0]
+        lag_72 = y_s.iloc[-72] if n >= 72 else y_s.iloc[0]
+        lag_168 = y_s.iloc[-168] if n >= 168 else y_s.iloc[0]
+
         return {
             'lag_1h': l1, 'lag_2h': l2, 'lag_3h': l3,
-            'lag_4h': y_s.iloc[-4], 'lag_12h': y_s.iloc[-12],
-            'lag_18h': y_s.iloc[-18], 'lag_24h': y_s.iloc[-24],
-            'lag_3d': y_s.iloc[-72], 'lag_7d': y_s.iloc[-168],
+            'lag_4h': lag_4, 'lag_12h': lag_12,
+            'lag_18h': lag_18, 'lag_24h': lag_24,
+            'lag_3d': lag_72, 'lag_7d': lag_168,
             'rollmean_3h': y_s.iloc[-3:].mean(), 'rollmean_6h': rm6,
             'rollmean_12h': y_s.iloc[-12:].mean(), 'rollmean_24h': y_s.iloc[-24:].mean(),
             'spike_ratio_1h_3h': (l1 + 1) / (l3 + 1),
@@ -216,18 +267,20 @@ class WarehouseForecaster:
             raw_in = self.model_inbound.predict(X_in)[0]
             raw_out = self.model_outbound.predict(X_out)[0]
 
-            # Áp dụng cơ chế bias tương ứng với nút bấm
+            # Áp dụng cơ chế bias thích ứng nhanh khi có Volume Spike
+            decay = max(0.4, 1.0 - step * 0.05)
             if horizon == 1:
                 b_in = self.bias_1h_in
                 b_out = self.bias_1h_out
             elif horizon <= 3:
-                b_in = float(np.mean(self.error_history_in[-6:])) if self.error_history_in else self.bias_1h_in
-                b_out = float(np.mean(self.error_history_out[-6:])) if self.error_history_out else self.bias_1h_out
+                # 3h: kết hợp EMA tức thời với decay nhẹ để giữ đà spike
+                b_in = self.bias_1h_in * decay
+                b_out = self.bias_1h_out * decay
             else:
-                # Horizon 12h: bias theo ca của giờ tương lai đó
+                # 12h/24h: ca hiện tại dùng bias EMA, các ca sau kết hợp Shift Bias
                 sb = get_shift_code(next_t.hour)
-                b_in = self.shift_bias_in[sb]
-                b_out = self.shift_bias_out[sb]
+                b_in = max(self.shift_bias_in[sb], self.bias_1h_in * decay)
+                b_out = max(self.shift_bias_out[sb], self.bias_1h_out * decay)
 
             p_in = max(0, raw_in + b_in)
             p_out = max(0, raw_out + b_out)
@@ -247,6 +300,7 @@ class WarehouseForecaster:
             y_sim_in.loc[next_t] = p_in
             y_sim_out.loc[next_t] = p_out
 
+
         return pd.DataFrame({
             'pred_workload_inbound': preds_in,
             'pred_workload_outbound': preds_out,
@@ -254,9 +308,8 @@ class WarehouseForecaster:
             'upper_90_outbound': upper_out
         }, index=future_idx)
 
-    # -------------------------------------------------------------------------
     # HÀM BẮT BUỘC: ĐẦU RA KẾT NỐI TRỰC TIẾP VỚI CAPACITY_MODEL.PY
-    # -------------------------------------------------------------------------
+
     def get_plan_for_capacity_model(self, current_time, horizon=12, initial_stocks=None):
         """
         Chuẩn bị DataFrame `df_plan` và `initial_stocks` theo đúng định dạng
@@ -305,12 +358,15 @@ class WarehouseForecaster:
         - df_plan: Kế hoạch tương lai (workload dự báo, labor, amr)
         - init_stocks: Bộ tồn kho hiện tại (inbound, buffer, outbound)
         """
+        # Đồng bộ hóa bias thực tế trước khi dự báo để bắt trọn Volume Spike
+        self.sync_bias_up_to(current_time, warmup_hours=48)
+
         hist_start = current_time - pd.Timedelta(hours=lookback)
         history_df = self.df.loc[hist_start:current_time].copy()
         df_plan, init_stocks = self.get_plan_for_capacity_model(current_time, horizon=horizon)
         return history_df, df_plan, init_stocks
 
-    def create_5_control_room_charts(self, history_df, sim_future, current_time, horizon=1):
+    def create_5_control_room_charts(self, history_df, sim_future, current_time, horizon=1, sim_after = None):
         """
         Tạo đối tượng Figure chứa trọn vẹn 5 biểu đồ dạng Cửa Sổ Trượt (Sliding Window):
         - Quá khứ (5h trước): Đường nét liền đen/màu đậm (Actual)
@@ -320,19 +376,31 @@ class WarehouseForecaster:
 
         # 1. Inbound Workload
         axes[0].plot(history_df.index, history_df['workload_inbound'], 'k-o', linewidth=2, label='Actual Quá khứ')
-        axes[0].plot(sim_future.index, sim_future['workload_inbound'], color='tab:blue', linestyle='--', marker='s', linewidth=2, label=f'Dự báo {horizon}h tới')
+                        # Đường Xanh: Luôn giữ nguyên nhu cầu tự nhiên của ML
+        axes[0].plot(sim_future.index, sim_future['workload_inbound'], color='tab:blue', linestyle='--', marker='s', linewidth=2, label=f'Dự báo Nhu cầu Tự nhiên ({horizon}h tới)')
         axes[0].plot([history_df.index[-1], sim_future.index[0]], [history_df['workload_inbound'].iloc[-1], sim_future['workload_inbound'].iloc[0]], color='tab:blue', linestyle=':')
+                
+                        # Đường Cam: Kế hoạch dỡ hàng thực tế sau khi đã thương lượng Heijunka (nếu có dời tải)
+        if sim_after is not None and not sim_after['workload_inbound'].equals(sim_future['workload_inbound']):
+            axes[0].plot(sim_after.index, sim_after['workload_inbound'], color='tab:orange', linestyle='--', marker='^', linewidth=2.5, label='Kế hoạch dỡ hàng sau Heijunka (Dời tải)')
+            axes[0].plot([history_df.index[-1], sim_after.index[0]], [history_df['workload_inbound'].iloc[-1], sim_after['workload_inbound'].iloc[0]], color='tab:orange', linestyle=':')
+                
         axes[0].axvline(x=current_time, color='gray', linestyle='--', linewidth=1.5)
         axes[0].set_title(f'BẢNG 1: DỰ BÁO WORKLOAD INBOUND — [5h Quá khứ + Dự báo {horizon}h tới]', fontsize=10, fontweight='bold')
-        axes[0].set_ylabel('Pallets/h'); axes[0].legend(loc='upper right'); axes[0].grid(True, linestyle='--', alpha=0.5)
-
-        # 2. Outbound Workload
+        axes[0].set_ylabel('Pallets/h'); axes[0].legend(loc='upper left'); axes[0].grid(True, linestyle='--', alpha=0.5)
+                
+                        # 2. Outbound Workload
         axes[1].plot(history_df.index, history_df['workload_outbound'], 'k-o', linewidth=2, label='Actual Quá khứ')
-        axes[1].plot(sim_future.index, sim_future['workload_outbound'], color='tab:green', linestyle='--', marker='s', linewidth=2, label=f'Dự báo {horizon}h tới')
+        axes[1].plot(sim_future.index, sim_future['workload_outbound'], color='tab:green', linestyle='--', marker='s', linewidth=2, label=f'Dự báo Xuất Tự nhiên ({horizon}h tới)')
         axes[1].plot([history_df.index[-1], sim_future.index[0]], [history_df['workload_outbound'].iloc[-1], sim_future['workload_outbound'].iloc[0]], color='tab:green', linestyle=':')
+                
+        if sim_after is not None and not sim_after['workload_outbound'].equals(sim_future['workload_outbound']):
+            axes[1].plot(sim_after.index, sim_after['workload_outbound'], color='tab:orange', linestyle='--', marker='^', linewidth=2.5, label='Kế hoạch bốc xe sau Heijunka')
+            axes[1].plot([history_df.index[-1], sim_after.index[0]], [history_df['workload_outbound'].iloc[-1], sim_after['workload_outbound'].iloc[0]], color='tab:orange', linestyle=':')
+                
         axes[1].axvline(x=current_time, color='gray', linestyle='--', linewidth=1.5)
         axes[1].set_title(f'BẢNG 2: DỰ BÁO WORKLOAD OUTBOUND — [5h Quá khứ + Dự báo {horizon}h tới]', fontsize=10, fontweight='bold')
-        axes[1].set_ylabel('Pallets/h'); axes[1].legend(loc='upper right'); axes[1].grid(True, linestyle='--', alpha=0.5)
+        axes[1].set_ylabel('Pallets/h'); axes[1].legend(loc='upper left'); axes[1].grid(True, linestyle='--', alpha=0.5)
 
         # 3. Storage Inbound
         axes[2].plot(history_df.index, history_df['storage_inbound'], color='purple', marker='o', linewidth=2, label='Tồn kho Quá khứ')
@@ -342,7 +410,7 @@ class WarehouseForecaster:
         axes[2].axhline(y=MAX_STORAGE_INBOUND, color='red', linestyle='-', linewidth=1.5, label=f'Nghẽn/Trần ({MAX_STORAGE_INBOUND})')
         axes[2].axvline(x=current_time, color='gray', linestyle='--', linewidth=1.5)
         axes[2].set_title(f'BẢNG 3: MÔ PHỎNG SÀN DỠ HÀNG INBOUND — [5h Quá khứ + Dự báo {horizon}h tới]', fontsize=10, fontweight='bold')
-        axes[2].set_ylabel('Pallets'); axes[2].legend(loc='upper right'); axes[2].grid(True, linestyle='--', alpha=0.5)
+        axes[2].set_ylabel('Pallets'); axes[2].legend(loc='upper left'); axes[2].grid(True, linestyle='--', alpha=0.5)
 
         # 4. Storage Buffer
         axes[3].plot(history_df.index, history_df['storage_buffer'], color='darkorange', marker='o', linewidth=2, label='Tồn kho Quá khứ')
@@ -352,7 +420,7 @@ class WarehouseForecaster:
         axes[3].axhline(y=MAX_STORAGE_BUFFER, color='red', linestyle='-', linewidth=1.5, label=f'Nghẽn/Trần ({MAX_STORAGE_BUFFER})')
         axes[3].axvline(x=current_time, color='gray', linestyle='--', linewidth=1.5)
         axes[3].set_title(f'BẢNG 4: MÔ PHỎNG KHO ĐỆM KITTING BUFFER — [5h Quá khứ + Dự báo {horizon}h tới]', fontsize=10, fontweight='bold')
-        axes[3].set_ylabel('Khay/Thùng'); axes[3].legend(loc='upper right'); axes[3].grid(True, linestyle='--', alpha=0.5)
+        axes[3].set_ylabel('Khay/Thùng'); axes[3].legend(loc='upper left'); axes[3].grid(True, linestyle='--', alpha=0.5)
 
         # 5. Storage Outbound
         axes[4].plot(history_df.index, history_df['storage_outbound'], color='saddlebrown', marker='o', linewidth=2, label='Tồn kho Quá khứ')
@@ -362,29 +430,29 @@ class WarehouseForecaster:
         axes[4].axhline(y=MAX_STORAGE_OUTBOUND, color='red', linestyle='-', linewidth=1.5, label=f'Nghẽn/Trần ({MAX_STORAGE_OUTBOUND})')
         axes[4].axvline(x=current_time, color='gray', linestyle='--', linewidth=1.5)
         axes[4].set_title(f'BẢNG 5: MÔ PHỎNG SÀN TẬP KẾT OUTBOUND — [5h Quá khứ + Dự báo {horizon}h tới]', fontsize=10, fontweight='bold')
-        axes[4].set_ylabel('Pallets'); axes[4].set_xlabel('Thời gian'); axes[4].legend(loc='upper right'); axes[4].grid(True, linestyle='--', alpha=0.5)
+        axes[4].set_ylabel('Pallets'); axes[4].set_xlabel('Thời gian'); axes[4].legend(loc='upper left'); axes[4].grid(True, linestyle='--', alpha=0.5)
 
         plt.tight_layout()
         return fig
 
 
-# ==============================================================================
-# 4. CHẠY BATCH TOÀN BỘ 2027 (FILE GỐC: VẼ 5 BẢNG DASHBOARD & LƯU CSV)
-# ==============================================================================
+
+#  CHẠY BATCH TOÀN BỘ 2027 (FILE GỐC: VẼ 5 BẢNG DASHBOARD & LƯU CSV)
+
 if __name__ == "__main__":
     print("=" * 70)
     print("  DENSO LOGISTICS - INFERENCE FINAL (3 HORIZONS + CAPACITY COMPATIBLE)")
     print("=" * 70)
 
-    data_path = "denso_logistics_simulation_test.csv"
+    data_path = resolve_path("denso_logistics_simulation_test.csv")
     df = pd.read_csv(data_path)
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df.set_index('timestamp', inplace=True)
     df = df.asfreq('h')
 
-    model_inbound = joblib.load('model_inbound.pkl')
-    model_outbound = joblib.load('model_outbound.pkl')
-    feature_cols_dict = joblib.load('model_features.pkl')
+    model_inbound = joblib.load(resolve_path('model_inbound.pkl'))
+    model_outbound = joblib.load(resolve_path('model_outbound.pkl'))
+    feature_cols_dict = joblib.load(resolve_path('model_features.pkl'))
 
     # Trích xuất đặc trưng cho toàn năm 2027
     feature_inbound = workload_lag_feature(df, 'workload_inbound')
@@ -535,12 +603,12 @@ if __name__ == "__main__":
     axes[0].plot(table_1_inbound.index, table_1_inbound['actual_workload_inbound'], label='Actual Inbound', color='black', alpha=0.5)
     axes[0].plot(table_1_inbound.index, table_1_inbound['pred_workload_inbound'], label='Predicted Inbound (HistXGB)', color='tab:blue', linewidth=1.2)
     axes[0].set_title('BẢNG 1: DỰ BÁO WORKLOAD INBOUND (NHẬP HÀNG TẠI DOCK)', fontsize=10, fontweight='bold')
-    axes[0].set_ylabel('Pallets/h'); axes[0].legend(loc='upper right'); axes[0].grid(True, linestyle='--', alpha=0.5)
+    axes[0].set_ylabel('Pallets/h'); axes[0].legend(loc='upper left'); axes[0].grid(True, linestyle='--', alpha=0.5)
 
     axes[1].plot(table_2_outbound.index, table_2_outbound['actual_workload_outbound'], label='Actual Outbound', color='black', alpha=0.5)
     axes[1].plot(table_2_outbound.index, table_2_outbound['pred_workload_outbound'], label='Predicted Outbound (HistXGB)', color='tab:green', linewidth=1.2)
     axes[1].set_title('BẢNG 2: DỰ BÁO WORKLOAD OUTBOUND (XUẤT HÀNG RA XE)', fontsize=10, fontweight='bold')
-    axes[1].set_ylabel('Pallets/h'); axes[1].legend(loc='upper right'); axes[1].grid(True, linestyle='--', alpha=0.5)
+    axes[1].set_ylabel('Pallets/h'); axes[1].legend(loc='upper left'); axes[1].grid(True, linestyle='--', alpha=0.5)
 
     axes[2].plot(table_3_storage_in.index, table_3_storage_in['storage_inbound_sim'], label='Simulated Storage Inbound', color='tab:purple', linewidth=1.2)
     axes[2].axhline(y=WARN_STORAGE_INBOUND, color='gold', linestyle='--', linewidth=1.5, label=f'Cảnh báo ({WARN_STORAGE_INBOUND})')
@@ -550,7 +618,7 @@ if __name__ == "__main__":
     axes[2].fill_between(table_3_storage_in.index, WARN_STORAGE_INBOUND, table_3_storage_in['storage_inbound_sim'], 
                          where=(table_3_storage_in['storage_inbound_sim'] >= WARN_STORAGE_INBOUND) & (table_3_storage_in['storage_inbound_sim'] < MAX_STORAGE_INBOUND), color='gold', alpha=0.3)
     axes[2].set_title('BẢNG 3: MÔ PHỎNG SÀN DỠ HÀNG INBOUND', fontsize=10, fontweight='bold')
-    axes[2].set_ylabel('Pallets'); axes[2].legend(loc='upper right'); axes[2].grid(True, linestyle='--', alpha=0.5)
+    axes[2].set_ylabel('Pallets'); axes[2].legend(loc='upper left'); axes[2].grid(True, linestyle='--', alpha=0.5)
 
     axes[3].plot(table_4_storage_buf.index, table_4_storage_buf['storage_buffer_sim'], label='Simulated Storage Buffer', color='tab:orange', linewidth=1.2)
     axes[3].axhline(y=WARN_STORAGE_BUFFER, color='gold', linestyle='--', linewidth=1.5, label=f'Cảnh báo ({WARN_STORAGE_BUFFER})')
@@ -560,7 +628,7 @@ if __name__ == "__main__":
     axes[3].fill_between(table_4_storage_buf.index, WARN_STORAGE_BUFFER, table_4_storage_buf['storage_buffer_sim'], 
                          where=(table_4_storage_buf['storage_buffer_sim'] >= WARN_STORAGE_BUFFER) & (table_4_storage_buf['storage_buffer_sim'] < MAX_STORAGE_BUFFER), color='gold', alpha=0.3)
     axes[3].set_title('BẢNG 4: MÔ PHỎNG KHO ĐỆM KITTING BUFFER', fontsize=10, fontweight='bold')
-    axes[3].set_ylabel('Khay/Thùng'); axes[3].legend(loc='upper right'); axes[3].grid(True, linestyle='--', alpha=0.5)
+    axes[3].set_ylabel('Khay/Thùng'); axes[3].legend(loc='upper left'); axes[3].grid(True, linestyle='--', alpha=0.5)
 
     axes[4].plot(table_5_storage_out.index, table_5_storage_out['storage_outbound_sim'], label='Simulated Storage Outbound', color='tab:brown', linewidth=1.2)
     axes[4].axhline(y=WARN_STORAGE_OUTBOUND, color='gold', linestyle='--', linewidth=1.5, label=f'Cảnh báo ({WARN_STORAGE_OUTBOUND})')
@@ -570,14 +638,14 @@ if __name__ == "__main__":
     axes[4].fill_between(table_5_storage_out.index, WARN_STORAGE_OUTBOUND, table_5_storage_out['storage_outbound_sim'], 
                          where=(table_5_storage_out['storage_outbound_sim'] >= WARN_STORAGE_OUTBOUND) & (table_5_storage_out['storage_outbound_sim'] < MAX_STORAGE_OUTBOUND), color='gold', alpha=0.3)
     axes[4].set_title('BẢNG 5: MÔ PHỎNG SÀN TẬP KẾT OUTBOUND', fontsize=10, fontweight='bold')
-    axes[4].set_ylabel('Pallets'); axes[4].set_xlabel('Thời gian (Q1/2027)'); axes[4].legend(loc='upper right'); axes[4].grid(True, linestyle='--', alpha=0.5)
+    axes[4].set_ylabel('Pallets'); axes[4].set_xlabel('Thời gian (Q1/2027)'); axes[4].legend(loc='upper left'); axes[4].grid(True, linestyle='--', alpha=0.5)
     plt.tight_layout()
     plt.savefig("denso_logistics_5_tables_dashboard.png", dpi=150)
     print("  -> Đã lưu biểu đồ tổng thể: denso_logistics_5_tables_dashboard.png")
 
-    # =========================================================================
-    # 3. TEST KẾT NỐI VỚI CAPACITY_MODEL.PY (BẢO ĐẢM TƯƠNG THÍCH 100%)
-    # =========================================================================
+
+    # TEST KẾT NỐI VỚI CAPACITY_MODEL.PY (BẢO ĐẢM TƯƠNG THÍCH 100%)
+
     print("\n[3/3] KIỂM THỬ KẾT NỐI TRỰC TIẾP VỚI CAPACITY_MODEL.PY...")
     try:
         from capacity_model import CapacityModelEngine

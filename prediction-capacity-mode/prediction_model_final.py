@@ -71,10 +71,10 @@ feature_column_dict = {}
 targets = ['workload_inbound', 'workload_outbound']
 for target in targets:
     feature = create_lag_feature(df, target)
-    train_test = df.loc['2026'].dropna()
-    X_cols = [c for c in feature.columns if c != "target"]
-    X_train = feature[X_cols]
-    y_train = feature["target"]
+    feature_train = feature.loc['2026'].dropna()
+    X_cols = [c for c in feature_train.columns if c != "target"]
+    X_train = feature_train[X_cols]
+    y_train = feature_train["target"]
 
     model = HistGradientBoostingRegressor(
         max_iter=400, 
