@@ -294,7 +294,7 @@ class CapacityModelEngine:
                         })
 
             elif b_type == 'outbound':
-                w_out = float(current_df.loc[curr_time, 'workload_outbound'])
+                w_out = int(current_df.loc[curr_time, 'workload_outbound'])
                 
                 # 1. Heijunka Outbound
                 for ratio in [0.15, 0.25, 0.35]:
