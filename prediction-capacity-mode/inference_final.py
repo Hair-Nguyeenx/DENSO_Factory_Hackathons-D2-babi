@@ -171,8 +171,8 @@ class WarehouseForecaster:
             return
 
         # Nhu cầu thực tế tự nhiên (đã bóc tách can thiệp Heijunka)
-        act_in = float(self.df.loc[current_time, 'workload_inbound']) - intervention_delta_in
-        act_out = float(self.df.loc[current_time, 'workload_outbound']) - intervention_delta_out
+        act_in = int(self.df.loc[current_time, 'workload_inbound']) - intervention_delta_in
+        act_out = int(self.df.loc[current_time, 'workload_outbound']) - intervention_delta_out
         shift_b = get_shift_code(current_time.hour)
 
         feat_in = self._build_single_feature('workload_inbound', current_time)
@@ -342,9 +342,9 @@ class WarehouseForecaster:
         # 3. Lấy tồn kho hiện tại (initial_stocks)
         if initial_stocks is None:
             if current_time in self.df.index:
-                s_in = float(self.df.loc[current_time, 'storage_inbound'])
-                s_buf = float(self.df.loc[current_time, 'storage_buffer'])
-                s_out = float(self.df.loc[current_time, 'storage_outbound'])
+                s_in = int(self.df.loc[current_time, 'storage_inbound'])
+                s_buf = int(self.df.loc[current_time, 'storage_buffer'])
+                s_out = int(self.df.loc[current_time, 'storage_outbound'])
             else:
                 s_in, s_buf, s_out = 50.0, 100.0, 50.0
             initial_stocks = (s_in, s_buf, s_out)
@@ -511,7 +511,7 @@ if __name__ == "__main__":
         capacity_in = labor_in * RATE_LABOR_INBOUND
         available_in = s_inbound + w_in
         space_in_buffer = max(0, MAX_STORAGE_BUFFER - s_buffer)
-        flow_in = int(min(available_in * 0.6, capacity_in, space_in_buffer))
+        flow_in = (min(available_in * 0.6, capacity_in, space_in_buffer))
 
         # Kho 2: Kho Buffer
         amr_capacity = amr * RATE_AMR

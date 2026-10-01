@@ -41,10 +41,10 @@ class CapacityModelEngine:
             row = df_sim.iloc[idx]
             w_in = float(row['workload_inbound'])
             w_out = float(row['workload_outbound'])
-            labor_in = float(row['labor_inbound'])
-            labor_out = float(row['labor_outbound'])
-            amr = float(row['amr_active'])
-            labor_buf = float(row['labor_buffer']) if 'labor_buffer' in row else 0.0
+            labor_in = int(row['labor_inbound'])
+            labor_out = int(row['labor_outbound'])
+            amr = int(row['amr_active'])
+            labor_buf = int(row['labor_buffer']) if 'labor_buffer' in row else 0.0
             
             # Lấy giờ thực tế
             hour = df_sim.index[idx].hour if hasattr(df_sim.index[idx], 'hour') else idx % 24
@@ -224,7 +224,7 @@ class CapacityModelEngine:
                 
                 # 1. Micro-Heijunka Inbound (Thử dời 15%, 25%, 35%, 50% sang các ca lân cận)
                 for ratio in [0.15, 0.25, 0.35, 0.50]:
-                    shift_w = int(w_in * ratio)
+                    shift_w = float(w_in * ratio)
                     if shift_w <= 0: continue
                       # Chỉ quét các ca tương lai ở phía trước trong khung dự báo: t-1, t-2, t-3, t-4, t-5
                     for offset in [-1, -2, -3, -4, -5]:
@@ -298,7 +298,7 @@ class CapacityModelEngine:
                 
                 # 1. Heijunka Outbound
                 for ratio in [0.15, 0.25, 0.35]:
-                    shift_w = int(w_out * ratio)
+                    shift_w = float(w_out * ratio)
                     if shift_w <= 0: continue
                     # Ưu tiên điều xe lấy hàng sớm ở các ca trước (offset < 0)
                     for offset in [-1, -2, -3]:
