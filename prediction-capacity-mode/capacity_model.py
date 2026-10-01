@@ -39,12 +39,12 @@ class CapacityModelEngine:
         
         for idx in range(len(df_sim)):
             row = df_sim.iloc[idx]
-            w_in = float(row['workload_inbound'])
-            w_out = float(row['workload_outbound'])
-            labor_in = float(row['labor_inbound'])
-            labor_out = float(row['labor_outbound'])
-            amr = float(row['amr_active'])
-            labor_buf = float(row['labor_buffer']) if 'labor_buffer' in row else 0.0
+            w_in = int(row['workload_inbound'])
+            w_out = int(row['workload_outbound'])
+            labor_in = int(row['labor_inbound'])
+            labor_out = int(row['labor_outbound'])
+            amr = int(row['amr_active'])
+            labor_buf = int(row['labor_buffer']) if 'labor_buffer' in row else 0.0
             
             # Lấy giờ thực tế
             hour = df_sim.index[idx].hour if hasattr(df_sim.index[idx], 'hour') else idx % 24
@@ -220,7 +220,7 @@ class CapacityModelEngine:
             candidates = []
 
             if b_type == 'inbound':
-                w_in = float(current_df.loc[curr_time, 'workload_inbound'])
+                w_in = int(current_df.loc[curr_time, 'workload_inbound'])
                 
                 # 1. Micro-Heijunka Inbound (Thử dời 15%, 25%, 35%, 50% sang các ca lân cận)
                 for ratio in [0.15, 0.25, 0.35, 0.50]:
