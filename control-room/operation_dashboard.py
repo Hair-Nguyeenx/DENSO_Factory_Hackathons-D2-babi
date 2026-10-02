@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -118,8 +119,7 @@ st.sidebar.info(f"Thời gian hiện tại: **{curr_t.strftime('%H:%M %d/%m/%Y')
 horizon_option = st.sidebar.radio(
     "Chọn khoảng thời gian dự báo",
     options=["1h", "3h", "12h"],
-    index=1,
-    help="Hệ thống hiển thị bộ bảng và biểu đồ tương ứng với khung thời gian t được chọn."
+    index=1
 )
 horizon_val = int(horizon_option.replace("h", ""))
 
@@ -152,6 +152,8 @@ if new_time_pick != st.session_state['current_time']:
             float(sched['storage_buffer_sim']),
             float(sched['storage_outbound_sim'])
         )
+    else:
+        st.session_state['simulated_stocks'] = None
     st.rerun()
 
 current_time = st.session_state['current_time']
@@ -325,6 +327,21 @@ header[data-testid="stHeader"] {
 </style>
 """
 st.markdown(theme_css + common_css, unsafe_allow_html=True)
+
+def format_action_log(log_str: str) -> str:
+    """Đảm bảo các đại lượng số (pallets, khay, người, xe, công nhân) luôn là số nguyên sạch sẽ."""
+    if not isinstance(log_str, str):
+        return str(log_str)
+    def _repl(match):
+        val = float(match.group(1))
+        unit = match.group(2)
+        return f"{int(round(val))} {unit}"
+    return re.sub(
+        r'(\d+(?:\.\d+)?)\s*(pallets?|khay|thùng|kiện|xe|người|công nhân)',
+        _repl,
+        log_str,
+        flags=re.IGNORECASE
+    )
 
 # ==============================================================================
 # HÀM HIỂN THỊ BẢNG DỮ LIỆU ĐƯỢC THIẾT KẾ CÓ VIỀN VÀ THANH CUỘN NGANG
@@ -611,11 +628,12 @@ if active_planned_hours:
         st.success(f"✅ **ĐANG VẬN HÀNH THEO KẾ HOẠCH ĐÃ DUYỆT** ({len(active_planned_hours)}/{len(df_plan)} mốc giờ trong horizon đã được điều độ tối ưu, kho an toàn)!")
     with col_ap2:
         st.markdown('<div class="cancel-plan-btn">', unsafe_allow_html=True)
-        if st.button("↩️ Hủy kế hoạch (Về bản gốc)", key="btn_cancel_master", use_container_width=True):
+        if st.button("Hủy áp dụng phương án đề xuất", key="btn_cancel_master", use_container_width=True):
             for t in active_planned_hours:
                 st.session_state['master_schedule'].pop(t, None)
                 st.session_state['committed_heijunka_in'].pop(t, None)
                 st.session_state['committed_heijunka_out'].pop(t, None)
+            st.session_state['simulated_stocks'] = None
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -687,58 +705,84 @@ connect_w_out = [history_df["workload_outbound"].iloc[-1]] + list(df_sim["worklo
 # --- BẢNG 1: DỰ BÁO WORKLOAD INBOUND ---
 with col_w_in:
     st.markdown("#### Bảng 1: Dự báo Workload Inbound")
-    tbl_w_in = pd.DataFrame({
+    has_heijunka_in = not np.allclose(df_sim["workload_inbound"].values, df_plan_natural["workload_inbound"].values, atol=0.1)
+    
+    tbl_data_in = {
         "Mốc giờ": [t.strftime("%H:%M %d/%m") for t in df_sim.index],
-        "Dự báo (pallets/h)": [f"≈ {round(v):.0f}" for v in df_sim["workload_inbound"]],
-        "Nhân công (người)": df_sim["labor_inbound"].astype(int),
-        "Năng lực dỡ (pallets/h)": (df_sim["labor_inbound"] * RATE_LABOR_INBOUND).astype(int),
-    })
-    tbl_w_in["Tải / Năng lực (%)"] = (
+        "Dự báo AI (pallets/h)": [f"≈ {round(v):.0f}" for v in df_plan_natural["workload_inbound"]],
+    }
+    if has_heijunka_in:
+        tbl_data_in["Kế hoạch dỡ (pallets/h)"] = [f"≈ {round(v):.0f}" for v in df_sim["workload_inbound"]]
+    tbl_data_in["Nhân công (người)"] = df_sim["labor_inbound"].astype(int)
+    tbl_data_in["Năng lực dỡ (pallets/h)"] = (df_sim["labor_inbound"] * RATE_LABOR_INBOUND).astype(int)
+    tbl_data_in["Tải / Năng lực (%)"] = (
         (df_sim["workload_inbound"] / (df_sim["labor_inbound"] * RATE_LABOR_INBOUND)) * 100
     ).round(1)
-    
+
+    tbl_w_in = pd.DataFrame(tbl_data_in)
     st.markdown(render_styled_table(tbl_w_in, is_light_theme=is_light, min_width="540px"), unsafe_allow_html=True)
 
     if show_charts:
         fig_w_in, ax1 = plt.subplots(figsize=(7, 3.4))
         history_color = "#334155" if is_light else "#64748b"
         forecast_color = "#0284c7" if is_light else "#38bdf8"
+        plan_color = "#ea580c" if is_light else "#fb923c"
+
+        connect_w_in_pred = [history_df["workload_inbound"].iloc[-1]] + list(df_plan_natural["workload_inbound"])
 
         ax1.plot(history_df.index, history_df["workload_inbound"], color=history_color, marker="o", linewidth=2, label="Thực tế (5h trước)")
-        ax1.plot(connect_time_idx, connect_w_in, color=forecast_color, linestyle="--", linewidth=2, label=f"Kế hoạch {horizon_option}")
-        ax1.plot(df_sim.index, df_sim["workload_inbound"], color=forecast_color, marker="s", linestyle="None")
+        ax1.plot(connect_time_idx, connect_w_in_pred, color=forecast_color, linestyle="--", linewidth=2, label=f"Dự báo AI ({horizon_option})")
+        ax1.plot(df_sim.index, df_plan_natural["workload_inbound"], color=forecast_color, marker="s", linestyle="None")
+        
+        if has_heijunka_in:
+            ax1.plot(connect_time_idx, connect_w_in, color=plan_color, linestyle="-", linewidth=2, label="Kế hoạch điều độ")
+            ax1.plot(df_sim.index, df_sim["workload_inbound"], color=plan_color, marker="^", linestyle="None")
+
         ax1.axvline(x=current_time, color="gray", linestyle=":", label="Hiện tại")
         ax1.set_ylabel("Pallets/h")
-        apply_chart_theme_and_top_legend(fig_w_in, ax1, ncol=3, is_light_theme=is_light)
+        apply_chart_theme_and_top_legend(fig_w_in, ax1, ncol=4 if has_heijunka_in else 3, is_light_theme=is_light)
         st.pyplot(fig_w_in)
         plt.close(fig_w_in)
 
 # --- BẢNG 2: DỰ BÁO WORKLOAD OUTBOUND ---
 with col_w_out:
     st.markdown("#### Bảng 2: Dự báo Workload Outbound")
-    tbl_w_out = pd.DataFrame({
+    has_heijunka_out = not np.allclose(df_sim["workload_outbound"].values, df_plan_natural["workload_outbound"].values, atol=0.1)
+
+    tbl_data_out = {
         "Mốc giờ": [t.strftime("%H:%M %d/%m") for t in df_sim.index],
-        "Dự báo (pallets/h)": [f"≈ {round(v):.0f}" for v in df_sim["workload_outbound"]],
-        "Nhân công (người)": df_sim["labor_outbound"].astype(int),
-        "Số xe AMR": df_sim["amr_active"].astype(int),
-        "Năng lực xuất (pallets/h)": (df_sim["labor_outbound"] * RATE_LABOR_OUTBOUND).astype(int),
-    })
-    tbl_w_out["Tải / Năng lực (%)"] = (
+        "Dự báo AI (pallets/h)": [f"≈ {round(v):.0f}" for v in df_plan_natural["workload_outbound"]],
+    }
+    if has_heijunka_out:
+        tbl_data_out["Kế hoạch xuất (pallets/h)"] = [f"≈ {round(v):.0f}" for v in df_sim["workload_outbound"]]
+    tbl_data_out["Nhân công (người)"] = df_sim["labor_outbound"].astype(int)
+    tbl_data_out["Số xe AMR"] = df_sim["amr_active"].astype(int)
+    tbl_data_out["Năng lực xuất (pallets/h)"] = (df_sim["labor_outbound"] * RATE_LABOR_OUTBOUND).astype(int)
+    tbl_data_out["Tải / Năng lực (%)"] = (
         (df_sim["workload_outbound"] / (df_sim["labor_outbound"] * RATE_LABOR_OUTBOUND)) * 100
     ).round(1)
-    
+
+    tbl_w_out = pd.DataFrame(tbl_data_out)
     st.markdown(render_styled_table(tbl_w_out, is_light_theme=is_light, min_width="560px"), unsafe_allow_html=True)
 
     if show_charts:
         fig_w_out, ax2 = plt.subplots(figsize=(7, 3.4))
         out_forecast_color = "#059669" if is_light else "#34d399"
+        plan_color = "#ea580c" if is_light else "#fb923c"
+
+        connect_w_out_pred = [history_df["workload_outbound"].iloc[-1]] + list(df_plan_natural["workload_outbound"])
 
         ax2.plot(history_df.index, history_df["workload_outbound"], color=history_color, marker="o", linewidth=2, label="Thực tế (5h trước)")
-        ax2.plot(connect_time_idx, connect_w_out, color=out_forecast_color, linestyle="--", linewidth=2, label=f"Kế hoạch {horizon_option}")
-        ax2.plot(df_sim.index, df_sim["workload_outbound"], color=out_forecast_color, marker="s", linestyle="None")
+        ax2.plot(connect_time_idx, connect_w_out_pred, color=out_forecast_color, linestyle="--", linewidth=2, label=f"Dự báo AI ({horizon_option})")
+        ax2.plot(df_sim.index, df_plan_natural["workload_outbound"], color=out_forecast_color, marker="s", linestyle="None")
+        
+        if has_heijunka_out:
+            ax2.plot(connect_time_idx, connect_w_out, color=plan_color, linestyle="-", linewidth=2, label="Kế hoạch điều độ")
+            ax2.plot(df_sim.index, df_sim["workload_outbound"], color=plan_color, marker="^", linestyle="None")
+
         ax2.axvline(x=current_time, color="gray", linestyle=":", label="Hiện tại")
         ax2.set_ylabel("Pallets/h")
-        apply_chart_theme_and_top_legend(fig_w_out, ax2, ncol=3, is_light_theme=is_light)
+        apply_chart_theme_and_top_legend(fig_w_out, ax2, ncol=4 if has_heijunka_out else 3, is_light_theme=is_light)
         st.pyplot(fig_w_out)
         plt.close(fig_w_out)
 
@@ -858,9 +902,13 @@ def show_preview_dialog(df_b, df_a, bottlenecks_orig, plan_solution, horizon_opt
     max_buf_b, max_buf_a = df_b['storage_buffer_sim'].max(), df_a['storage_buffer_sim'].max()
     max_out_b, max_out_a = df_b['storage_outbound_sim'].max(), df_a['storage_outbound_sim'].max()
 
-    diff_in = max_in_a - max_in_b
-    diff_buf = max_buf_a - max_buf_b
-    diff_out = max_out_a - max_out_b
+    r_in_b, r_in_a = int(round(max_in_b)), int(round(max_in_a))
+    r_buf_b, r_buf_a = int(round(max_buf_b)), int(round(max_buf_a))
+    r_out_b, r_out_a = int(round(max_out_b)), int(round(max_out_a))
+
+    diff_in = r_in_a - r_in_b
+    diff_buf = r_buf_a - r_buf_b
+    diff_out = r_out_a - r_out_b
 
     col_met1, col_met2, col_met3, col_met4 = st.columns(4)
     col_met1.metric(
@@ -871,20 +919,20 @@ def show_preview_dialog(df_b, df_a, bottlenecks_orig, plan_solution, horizon_opt
     )
     col_met2.metric(
         "Đỉnh tồn Sàn Inbound",
-        f"≈ {round(max_in_a):.0f} pal",
-        delta=f"≈ {round(diff_in):+.0f} pal",
+        f"≈ {r_in_a} pal",
+        delta=f"≈ {diff_in:+} pal",
         delta_color="normal" if diff_in <= 0 else "inverse"
     )
     col_met3.metric(
         "Đỉnh tồn Kitting Buffer",
-        f"≈ {round(max_buf_a):.0f} khay",
-        delta=f"≈ {round(diff_buf):+.0f} khay",
+        f"≈ {r_buf_a} khay",
+        delta=f"≈ {diff_buf:+} khay",
         delta_color="normal" if diff_buf <= 0 else "inverse"
     )
     col_met4.metric(
         "Đỉnh tồn Sàn Outbound",
-        f"≈ {round(max_out_a):.0f} pal",
-        delta=f"≈ {round(diff_out):+.0f} pal",
+        f"≈ {r_out_a} pal",
+        delta=f"≈ {diff_out:+} pal",
         delta_color="normal" if diff_out <= 0 else "inverse"
     )
 
@@ -960,34 +1008,48 @@ def show_preview_dialog(df_b, df_a, bottlenecks_orig, plan_solution, horizon_opt
         s_buf_a = df_a.loc[t, "storage_buffer_sim"]
         s_out_b = df_b.loc[t, "storage_outbound_sim"]
         s_out_a = df_a.loc[t, "storage_outbound_sim"]
-        l_in_a = int(df_a.loc[t, "labor_inbound"])
-        l_out_a = int(df_a.loc[t, "labor_outbound"])
+        l_in_b = int(round(df_b.loc[t, "labor_inbound"]))
+        l_in_a = int(round(df_a.loc[t, "labor_inbound"]))
+        l_out_b = int(round(df_b.loc[t, "labor_outbound"]))
+        l_out_a = int(round(df_a.loc[t, "labor_outbound"]))
+
+        rw_in_b, rw_in_a = int(round(w_in_b)), int(round(w_in_a))
+        rs_in_b, rs_in_a = int(round(s_in_b)), int(round(s_in_a))
+        rs_buf_b, rs_buf_a = int(round(s_buf_b)), int(round(s_buf_a))
+        rs_out_b, rs_out_a = int(round(s_out_b)), int(round(s_out_a))
+
+        d_w_in = rw_in_a - rw_in_b
+        d_s_in = rs_in_a - rs_in_b
+        d_s_buf = rs_buf_a - rs_buf_b
+        d_s_out = rs_out_a - rs_out_b
 
         notes = []
-        if int(df_a.loc[t, "labor_inbound"]) != int(df_b.loc[t, "labor_inbound"]):
-            notes.append(f"Nhân công In: {int(df_b.loc[t, 'labor_inbound'])} ➔ {l_in_a}")
-        if int(df_a.loc[t, "labor_outbound"]) != int(df_b.loc[t, "labor_outbound"]):
-            notes.append(f"Nhân công Out: {int(df_b.loc[t, 'labor_outbound'])} ➔ {l_out_a}")
-        if round(w_in_a) != round(w_in_b):
-            notes.append(f"Workload In dời: ≈ {round(w_in_a - w_in_b):+.0f}")
-        if round(s_in_a) < round(s_in_b):
-            notes.append(f"Giảm tồn In ≈ {round(s_in_b - s_in_a):.0f} pal")
-        if round(s_buf_a) > round(s_buf_b):
-            notes.append(f"Tăng tồn Buffer ≈ {round(s_buf_a - s_buf_b):.0f} khay")
-        elif round(s_buf_a) < round(s_buf_b):
-            notes.append(f"Giảm tồn Buffer ≈ {round(s_buf_b - s_buf_a):.0f} khay")
-        if round(s_out_a) > round(s_out_b):
-            notes.append(f"Tăng tồn Outbound ≈ {round(s_out_a - s_out_b):.0f} pal")
-        elif round(s_out_a) < round(s_out_b):
-            notes.append(f"Giảm tồn Out ≈ {round(s_out_b - s_out_a):.0f} pal")
+        if l_in_a != l_in_b:
+            notes.append(f"Nhân công In: {l_in_b} ➔ {l_in_a}")
+        if l_out_a != l_out_b:
+            notes.append(f"Nhân công Out: {l_out_b} ➔ {l_out_a}")
+        if d_w_in != 0:
+            notes.append(f"Workload In dời: ≈ {d_w_in:+} pal")
+        if d_s_in < 0:
+            notes.append(f"Giảm tồn In ≈ {-d_s_in} pal")
+        elif d_s_in > 0:
+            notes.append(f"Tăng tồn In ≈ {d_s_in} pal")
+        if d_s_buf > 0:
+            notes.append(f"Tăng tồn Buffer ≈ {d_s_buf} khay")
+        elif d_s_buf < 0:
+            notes.append(f"Giảm tồn Buffer ≈ {-d_s_buf} khay")
+        if d_s_out > 0:
+            notes.append(f"Tăng tồn Outbound ≈ {d_s_out} pal")
+        elif d_s_out < 0:
+            notes.append(f"Giảm tồn Out ≈ {-d_s_out} pal")
 
         comparison_rows.append({
             "Mốc giờ": t_str,
-            "Workload In (Trước ➔ Sau)": f"≈ {round(w_in_b):.0f} ➔ ≈ {round(w_in_a):.0f}",
+            "Workload In (Trước ➔ Sau)": f"≈ {rw_in_b} ➔ ≈ {rw_in_a}",
             "Nhân sự In / Out": f"{l_in_a} / {l_out_a} người",
-            "Tồn Inbound (Trước ➔ Sau)": f"≈ {round(s_in_b):.0f} ➔ ≈ {round(s_in_a):.0f}",
-            "Tồn Buffer (Trước ➔ Sau)": f"≈ {round(s_buf_b):.0f} ➔ ≈ {round(s_buf_a):.0f}",
-            "Tồn Outbound (Trước ➔ Sau)": f"≈ {round(s_out_b):.0f} ➔ ≈ {round(s_out_a):.0f}",
+            "Tồn Inbound (Trước ➔ Sau)": f"≈ {rs_in_b} ➔ ≈ {rs_in_a}",
+            "Tồn Buffer (Trước ➔ Sau)": f"≈ {rs_buf_b} ➔ ≈ {rs_buf_a}",
+            "Tồn Outbound (Trước ➔ Sau)": f"≈ {rs_out_b} ➔ ≈ {rs_out_a}",
             "Ghi chú cải thiện": "; ".join(notes) if notes else "Ổn định"
         })
 
@@ -1034,48 +1096,72 @@ def show_preview_dialog(df_b, df_a, bottlenecks_orig, plan_solution, horizon_opt
 if run_capacity_solve:
     st.markdown("### PHÂN TÍCH VÀ ĐIỀU CHỈNH NĂNG LỰC VẬN HÀNH")
 
-    if active_planned_hours:
+    bottlenecks_current = capacity_engine.scan_bottlenecks(df_sim)
+    unmitigated_bns = [b for b in bottlenecks_current if df_sim.index[b['time_index']] not in active_planned_hours]
+
+    if active_planned_hours and len(active_planned_hours) == len(df_plan) and not unmitigated_bns:
         st.success(f"Trạng thái vận hành ổn định trong {horizon_option} tới. Kế hoạch điều độ tối ưu đã được áp dụng thành công ({len(active_planned_hours)}/{len(df_plan)} mốc giờ), các chỉ số tải và sức chứa kho đều trong ngưỡng an toàn.")
+        col_rev1, col_rev2 = st.columns([1.5, 3.5])
+        with col_rev1:
+            if st.button("Xem lại phương án tối ưu", type="secondary", use_container_width=True, key="btn_review_applied"):
+                df_sim_natural = capacity_engine.simulate_24h(df_plan_natural, init_stocks)
+                bns_natural = capacity_engine.scan_bottlenecks(df_sim_natural)
+                sol_plan = capacity_engine.solve_capacity_bottleneck(df_plan_natural, init_stocks)
+                show_preview_dialog(df_sim_natural, df_sim, bns_natural, sol_plan, horizon_option, is_light, history_df)
+    elif not bottlenecks_current or not unmitigated_bns:
+        st.success(f"Trạng thái vận hành ổn định trong {horizon_option} tới. Không phát hiện điểm nghẽn kho vượt ngưỡng an toàn.")
     else:
-        bottlenecks_current = capacity_engine.scan_bottlenecks(df_sim)
+        active_bns = unmitigated_bns if active_planned_hours else bottlenecks_current
+        st.warning(f"Cảnh báo: Phát hiện {len(active_bns)} mốc thời gian có nguy cơ nghẽn kho trong kế hoạch.")
+        bn_rows = []
+        for b in active_bns:
+            t_idx = b['time_index']
+            b_type = b.get('type', '')
+            if b_type == 'inbound':
+                stock_val = df_sim.iloc[t_idx]['storage_inbound_sim']
+                warn_val = WARN_STORAGE_INBOUND
+            elif b_type == 'buffer':
+                stock_val = df_sim.iloc[t_idx]['storage_buffer_sim']
+                warn_val = WARN_STORAGE_BUFFER
+            else:
+                stock_val = df_sim.iloc[t_idx]['storage_outbound_sim']
+                warn_val = WARN_STORAGE_OUTBOUND
+            excess = max(0, int(round(stock_val)) - int(round(warn_val)))
+            bn_rows.append({
+                "Chỉ số bước": b['time_index'],
+                "Mốc giờ": b['hour'],
+                "Khu vực nghẽn": b['type'],
+                "Mức độ vượt ngưỡng (pallets/khay)": f"≈ {excess}"
+            })
+        df_bn = pd.DataFrame(bn_rows)
+        st.markdown(render_styled_table(df_bn, is_light_theme=is_light, min_width="540px"), unsafe_allow_html=True)
 
-        if not bottlenecks_current:
-            st.success(f"Trạng thái vận hành ổn định trong {horizon_option} tới. Không phát hiện điểm nghẽn kho vượt ngưỡng an toàn.")
-        else:
-            st.warning(f"Cảnh báo: Phát hiện {len(bottlenecks_current)} mốc thời gian có nguy cơ nghẽn kho trong kế hoạch.")
-            
-            df_bn = pd.DataFrame(bottlenecks_current)
-            df_bn.columns = ["Chỉ số bước", "Mốc giờ", "Khu vực nghẽn", "Mức độ vượt ngưỡng (pallets/khay)"]
-            df_bn["Mức độ vượt ngưỡng (pallets/khay)"] = [f"≈ {round(float(v)):.0f}" for v in df_bn["Mức độ vượt ngưỡng (pallets/khay)"]]
-            st.markdown(render_styled_table(df_bn, is_light_theme=is_light, min_width="540px"), unsafe_allow_html=True)
+        st.markdown("#### Đề xuất phương án điều phối tự động")
+        
+        # Tìm kiếm giải pháp điều độ cho df_plan hiện tại
+        plan_solution = capacity_engine.solve_capacity_bottleneck(df_plan, init_stocks)
+        solution_status = plan_solution.get("status", "NO_ACTION_NEEDED")
+        df_after_sol = plan_solution.get("df_after", df_sim)
 
-            st.markdown("#### Đề xuất phương án điều phối tự động")
-            
-            # Tìm kiếm giải pháp điều độ cho df_plan hiện tại
-            plan_solution = capacity_engine.solve_capacity_bottleneck(df_plan, init_stocks)
-            solution_status = plan_solution.get("status", "NO_ACTION_NEEDED")
-            df_after_sol = plan_solution.get("df_after", df_sim)
+        sol_col1, sol_col2, sol_col3 = st.columns([1.2, 1.8, 1.0])
+        
+        with sol_col1:
+            st.info(f"**Trạng thái:** {solution_status}\n\n**Cấp độ can thiệp:** {plan_solution.get('level', 'N/A')}\n\n**Chi phí nhân công:** {plan_solution.get('cost', 0)} man-hours")
 
-            sol_col1, sol_col2, sol_col3 = st.columns([1.2, 1.8, 1.0])
-            
-            with sol_col1:
-                st.info(f"**Trạng thái:** {solution_status}\n\n**Cấp độ can thiệp:** {plan_solution.get('level', 'N/A')}\n\n**Chi phí nhân công:** {plan_solution.get('cost', 0)} man-hours")
+        with sol_col2:
+            st.markdown("**Các bước hành động chi tiết:**")
+            action_logs = plan_solution.get('action_logs', [])
+            if action_logs:
+                for log in action_logs:
+                    st.write(f"- {format_action_log(log)}")
+            else:
+                st.write(plan_solution.get('message', 'Không có hành động bổ sung.'))
 
-            with sol_col2:
-                st.markdown("**Các bước hành động chi tiết:**")
-                action_logs = plan_solution.get('action_logs', [])
-                if action_logs:
-                    for log in action_logs:
-                        st.write(f"- {log}")
-                else:
-                    st.write(plan_solution.get('message', 'Không có hành động bổ sung.'))
-
-            with sol_col3:
-                st.markdown("**Chế độ xem trước:**")
-                if solution_status in ["SUCCESS", "PARTIAL_SUCCESS"]:
-                    if st.button("Mở chế độ Preview", type="primary", use_container_width=True):
-                        show_preview_dialog(df_sim, df_after_sol, bottlenecks_current, plan_solution, horizon_option, is_light, history_df)
-                    caption_color = "#000000" if is_light else "#ffffff"
-                    # st.markdown(f"<p style='color: {caption_color}; font-size: 12.5px; font-weight: 500; margin-top: 6px;'>Xem dự báo và dòng chảy kho sau khi áp dụng phương án trong cửa sổ pop-up.</p>", unsafe_allow_html=True)
-                else:
-                    st.button("Không khả dụng Preview", disabled=True, use_container_width=True)
+        with sol_col3:
+            st.markdown("**Chế độ xem trước:**")
+            if solution_status in ["SUCCESS", "PARTIAL_SUCCESS"]:
+                if st.button("Mở chế độ Preview", type="primary", use_container_width=True, key="btn_open_preview"):
+                    show_preview_dialog(df_sim, df_after_sol, active_bns, plan_solution, horizon_option, is_light, history_df)
+                caption_color = "#000000" if is_light else "#ffffff"
+            else:
+                st.button("Không khả dụng Preview", disabled=True, use_container_width=True)
