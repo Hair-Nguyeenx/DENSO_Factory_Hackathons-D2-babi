@@ -223,9 +223,9 @@ class CapacityModelEngine:
                 w_in = float(current_df.loc[curr_time, 'workload_inbound'])
                 
                 # 1. Micro-Heijunka Inbound (Thử dời 15%, 25%, 35%, 50% sang các ca lân cận)
-                for ratio in [0.15, 0.25, 0.35, 0.50]:
-                    shift_w = float(w_in * ratio)
-                    if shift_w <= 0: continue
+                shift_candidates = sorted(list(set(int(round(w_in * r)) for r in [0.15, 0.25, 0.35, 0.50])))
+                for shift_w in shift_candidates:
+                    if shift_w <= 0 or shift_w >= int(w_in): continue
                       # Chỉ quét các ca tương lai ở phía trước trong khung dự báo: t-1, t-2, t-3, t-4, t-5
                     for offset in [-1, -2, -3, -4, -5]:
                         target_idx = t_idx + offset
@@ -297,9 +297,9 @@ class CapacityModelEngine:
                 w_out = float(current_df.loc[curr_time, 'workload_outbound'])
                 
                 # 1. Heijunka Outbound
-                for ratio in [0.15, 0.25, 0.35]:
-                    shift_w = float(w_out * ratio)
-                    if shift_w <= 0: continue
+                shift_candidates = sorted(list(set(int(round(w_out * r)) for r in [0.15, 0.25, 0.35])))
+                for shift_w in shift_candidates:
+                    if shift_w <= 0 or shift_w >= int(w_out): continue
                     # Ưu tiên điều xe lấy hàng sớm ở các ca trước (offset < 0)
                     for offset in [-1, -2, -3]:
                         target_idx = t_idx + offset
