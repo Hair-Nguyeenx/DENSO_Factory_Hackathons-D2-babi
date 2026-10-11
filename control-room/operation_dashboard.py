@@ -14,9 +14,24 @@ if not PRED_DIR.exists():
     PRED_DIR = Path(__file__).resolve().parent
     BASE_DIR = PRED_DIR
 
-DATA_PATH = BASE_DIR / "denso_logistics_simulation_test.csv"
-if not DATA_PATH.exists():
-    DATA_PATH = PRED_DIR / "denso_logistics_simulation_test.csv"
+candidate_data_paths = [
+    BASE_DIR / "data" / "denso_logistics_simulation_test.csv",
+    PRED_DIR / "data" / "denso_logistics_simulation_test.csv",
+    Path("data") / "denso_logistics_simulation_test.csv",
+    BASE_DIR / "denso_logistics_simulation_test.csv",
+    PRED_DIR / "denso_logistics_simulation_test.csv",
+    Path("denso_logistics_simulation_test.csv")
+]
+
+DATA_PATH = None
+for p in candidate_data_paths:
+    if p.exists():
+        DATA_PATH = p
+        break
+
+if DATA_PATH is None:
+    DATA_PATH = BASE_DIR / "data" / "denso_logistics_simulation_test.csv"
+
 
 # Thêm PRED_DIR vào sys.path và chuyển working dir tạm thời để load đúng file pkl
 sys.path.insert(0, str(PRED_DIR))

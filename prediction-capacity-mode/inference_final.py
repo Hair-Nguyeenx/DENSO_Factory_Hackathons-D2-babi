@@ -14,14 +14,25 @@ def resolve_path(filename):
     if os.path.isabs(filename) and os.path.exists(filename):
         return filename
     if os.path.exists(filename):
-        return filename
-    p_base = os.path.join(BASE_DIR, filename)
-    if os.path.exists(p_base):
-        return p_base
-    p_parent = os.path.join(os.path.dirname(BASE_DIR), filename)
-    if os.path.exists(p_parent):
-        return p_parent
-    return p_base
+        return os.path.abspath(filename)
+    
+    # Danh sách các đường dẫn ứng viên để tìm kiếm
+    root_dir = os.path.dirname(BASE_DIR)
+    candidate_paths = [
+        os.path.join(root_dir, "data", filename),
+        os.path.join(BASE_DIR, "data", filename),
+        os.path.join(BASE_DIR, filename),
+        os.path.join(root_dir, filename),
+        os.path.join("data", filename)
+    ]
+    for p in candidate_paths:
+        if os.path.exists(p):
+            return os.path.abspath(p)
+            
+    # Mặc định trả về đường dẫn trong thư mục data hoặc BASE_DIR
+    default_p = os.path.join(root_dir, "data", filename)
+    return default_p if os.path.exists(os.path.dirname(default_p)) else os.path.join(BASE_DIR, filename)
+
 
 #  HẰNG SỐ & ĐỊNH MỨC NĂNG LỰC (ĐỒNG BỘ 100% VỚI CAPACITY_MODEL.PY)
 
@@ -591,12 +602,16 @@ if __name__ == "__main__":
         'scenario': df_2027['scenario'].values
     }).set_index('timestamp')
 
-    table_1_inbound.to_csv("table_1_workload_inbound.csv")
-    table_2_outbound.to_csv("table_2_workload_outbound.csv")
-    table_3_storage_in.to_csv("table_3_storage_inbound.csv")
-    table_4_storage_buf.to_csv("table_4_storage_buffer.csv")
-    table_5_storage_out.to_csv("table_5_storage_outbound.csv")
-    print("  -> Đã lưu 5 bảng: table_1_... đến table_5_... thành công.")
+    out_dir = os.path.join(os.path.dirname(BASE_DIR), "data")
+    if not os.path.exists(out_dir):
+        out_dir = BASE_DIR
+
+    table_1_inbound.to_csv(os.path.join(out_dir, "table_1_workload_inbound.csv"))
+    table_2_outbound.to_csv(os.path.join(out_dir, "table_2_workload_outbound.csv"))
+    table_3_storage_in.to_csv(os.path.join(out_dir, "table_3_storage_inbound.csv"))
+    table_4_storage_buf.to_csv(os.path.join(out_dir, "table_4_storage_buffer.csv"))
+    table_5_storage_out.to_csv(os.path.join(out_dir, "table_5_storage_outbound.csv"))
+    print(f"  -> Đã lưu 5 bảng: table_1_... đến table_5_... thành công vào {out_dir}.")
 
     # Vẽ và lưu biểu đồ 5 Panel tổng quan
     fig, axes = plt.subplots(5, 1, figsize=(16, 18), sharex=True)
