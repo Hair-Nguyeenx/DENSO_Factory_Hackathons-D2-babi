@@ -1,10 +1,30 @@
+import os
 import numpy as np 
 import pandas as pd 
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 import joblib
 
-data_path = "denso_logistics_simulation_test.csv"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(SCRIPT_DIR)
+
+candidate_data_paths = [
+    os.path.join(ROOT_DIR, "data", "denso_logistics_simulation_test.csv"),
+    os.path.join(SCRIPT_DIR, "data", "denso_logistics_simulation_test.csv"),
+    os.path.join("data", "denso_logistics_simulation_test.csv"),
+    os.path.join(ROOT_DIR, "denso_logistics_simulation_test.csv"),
+    os.path.join(SCRIPT_DIR, "denso_logistics_simulation_test.csv"),
+    "denso_logistics_simulation_test.csv"
+]
+
+data_path = None
+for p in candidate_data_paths:
+    if os.path.exists(p):
+        data_path = p
+        break
+
+if data_path is None:
+    data_path = os.path.join(ROOT_DIR, "data", "denso_logistics_simulation_test.csv")
 
 df = pd.read_csv(data_path)
 df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -12,6 +32,7 @@ df.set_index('timestamp', inplace=True)
 df = df.asfreq('h')
 
 train = df.loc['2026'].copy()
+
 
 #Tạo các rolling lag features cho workload_inbound và workload_outbound 
 def create_lag_feature(df, target_cols):
@@ -94,12 +115,13 @@ for target in targets:
     trained_models[target] = model
     feature_column_dict[target] = X_cols
 
-joblib.dump(trained_models['workload_inbound'], 'model_inbound.pkl')
-joblib.dump(trained_models['workload_outbound'], 'model_outbound.pkl')
-joblib.dump(feature_column_dict, 'model_features.pkl')
+joblib.dump(trained_models['workload_inbound'], os.path.join(SCRIPT_DIR, 'model_inbound.pkl'))
+joblib.dump(trained_models['workload_outbound'], os.path.join(SCRIPT_DIR, 'model_outbound.pkl'))
+joblib.dump(feature_column_dict, os.path.join(SCRIPT_DIR, 'model_features.pkl'))
 
 print("ĐÃ LƯU THÀNH CÔNG:")
-print(" model_inbound.pkl   (Mô hình Inbound)")
-print(" model_outbound.pkl  (Mô hình Outbound)")
-print(" model_features.pkl (Cấu trúc đặc trưng huấn luyện)")
+print(f" {os.path.join(SCRIPT_DIR, 'model_inbound.pkl')}   (Mô hình Inbound)")
+print(f" {os.path.join(SCRIPT_DIR, 'model_outbound.pkl')}  (Mô hình Outbound)")
+print(f" {os.path.join(SCRIPT_DIR, 'model_features.pkl')} (Cấu trúc đặc trưng huấn luyện)")
+
 

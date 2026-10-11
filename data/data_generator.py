@@ -1,5 +1,7 @@
+import os
 import pandas as pd
 import numpy as np
+
 
 # ==============================================================================
 # 1. CẤU HÌNH HẰNG SỐ VẬT LÝ & ĐỊNH MỨC NĂNG LỰC
@@ -196,9 +198,11 @@ def main():
         w_in_prev, w_out_prev = w_in, w_out
 
     df = pd.DataFrame(records)
-    output_filename = "denso_logistics_simulation_test.csv"
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    output_filename = os.path.join(current_dir, "denso_logistics_simulation_test.csv")
     df.to_csv(output_filename, index=False)
-    print(f"Hoàn thành! Đã tạo thành công {len(df)} dòng dữ liệu.")
+    print(f"Hoàn thành! Đã tạo thành công {len(df)} dòng dữ liệu tại {output_filename}.")
 
 if __name__ == "__main__":
     main()
+
