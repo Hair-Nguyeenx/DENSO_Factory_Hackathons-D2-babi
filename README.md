@@ -19,7 +19,7 @@ Hệ thống giải quyết bài toán điều độ logistics nội bộ nhà m
 ```mermaid
 flowchart TD
     subgraph DATA_TIER[Data Engine & Simulation]
-        DG[data/data_generator.py] --> CSV[(data/denso_logistics_simulation_test.csv)]
+        DG[data/input/data_generator.py] --> CSV[(data/input/denso_logistics_simulation_test.csv)]
     end
 
     subgraph AI_TIER[AI Machine Learning Forecasting]
@@ -50,19 +50,22 @@ flowchart TD
 DENSO_Factory_Hackathons-D2-babi/
 |
 |-- README.md                              # Tài liệu tổng quan hệ thống (File này)
-|-- DATA_README.md                         # Đặc tả chi tiết tập dữ liệu và script mô phỏng
 |-- requirements.txt                       # Danh mục thư viện phụ thuộc tối giản
 |
-|-- data/                                  # Dữ liệu mô phỏng và script phát sinh
-|   |-- data_generator.py                  # Script sinh dữ liệu mô phỏng chuỗi logistics
-|   |-- denso_logistics_simulation_test.csv# Tập dữ liệu chuẩn 15 tháng (10.944 giờ)
-|   |-- table_1_workload_inbound.csv       # Bảng kết quả Inbound tập test 2027
-|   |-- table_2_workload_outbound.csv      # Bảng kết quả Outbound tập test 2027
-|   |-- table_3_storage_inbound.csv        # Bảng mô phỏng tồn kho Inbound tập test 2027
-|   |-- table_4_storage_buffer.csv         # Bảng mô phỏng tồn kho Buffer tập test 2027
-|   `-- table_5_storage_outbound.csv       # Bảng mô phỏng tồn kho Outbound tập test 2027
+|-- data/                                  # Dữ liệu mô phỏng và kết quả dự báo
+|   |-- DATA_DICTIONARY.md                 # Từ điển dữ liệu chi tiết (Input & Output)
+|   |-- input/                             # Dữ liệu chuỗi thời gian đầu vào
+|   |   |-- data_generator.py              # Script mô phỏng dòng chảy logistics Pull Flow TPS
+|   |   `-- denso_logistics_simulation_test.csv # Tập dữ liệu chuẩn 15 tháng (10.920 giờ)
+|   `-- output/                            # Kết quả dự báo và mô phỏng tập kiểm thử 2027
+|       |-- table_1_workload_inbound.csv   # Bảng dự báo Workload tại Dock Inbound
+|       |-- table_2_workload_outbound.csv  # Bảng dự báo Workload tại Dock Outbound
+|       |-- table_3_storage_inbound.csv    # Bảng mô phỏng tồn kho sàn Inbound
+|       |-- table_4_storage_buffer.csv     # Bảng mô phỏng tồn kho Kitting Buffer
+|       `-- table_5_storage_outbound.csv   # Bảng mô phỏng tồn kho sàn Outbound
 |
 |-- control-room/                          # Module Trung tâm điều hành thời gian thực
+
 |   |-- operation_dashboard.py             # Dashboard Streamlit của Control Room
 |   `-- README.md                          # Hướng dẫn vận hành và đặc tả giao diện
 
@@ -124,8 +127,9 @@ python prediction-capacity-mode/prediction_model_final.py
 
 ### 4. Sinh lại dữ liệu mô phỏng:
 ```bash
-python data/data_generator.py
+python data/input/data_generator.py
 ```
+
 
 
 ---

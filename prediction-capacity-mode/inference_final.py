@@ -19,19 +19,26 @@ def resolve_path(filename):
     # Danh sách các đường dẫn ứng viên để tìm kiếm
     root_dir = os.path.dirname(BASE_DIR)
     candidate_paths = [
+        os.path.join(root_dir, "data", "input", filename),
         os.path.join(root_dir, "data", filename),
+        os.path.join(BASE_DIR, "data", "input", filename),
         os.path.join(BASE_DIR, "data", filename),
         os.path.join(BASE_DIR, filename),
         os.path.join(root_dir, filename),
+        os.path.join("data", "input", filename),
         os.path.join("data", filename)
     ]
     for p in candidate_paths:
         if os.path.exists(p):
             return os.path.abspath(p)
             
-    # Mặc định trả về đường dẫn trong thư mục data hoặc BASE_DIR
-    default_p = os.path.join(root_dir, "data", filename)
-    return default_p if os.path.exists(os.path.dirname(default_p)) else os.path.join(BASE_DIR, filename)
+    # Mặc định trả về đường dẫn trong thư mục data/input, data hoặc BASE_DIR
+    default_p = os.path.join(root_dir, "data", "input", filename)
+    if os.path.exists(os.path.dirname(default_p)):
+        return default_p
+    default_p2 = os.path.join(root_dir, "data", filename)
+    return default_p2 if os.path.exists(os.path.dirname(default_p2)) else os.path.join(BASE_DIR, filename)
+
 
 
 #  HẰNG SỐ & ĐỊNH MỨC NĂNG LỰC (ĐỒNG BỘ 100% VỚI CAPACITY_MODEL.PY)
@@ -602,9 +609,12 @@ if __name__ == "__main__":
         'scenario': df_2027['scenario'].values
     }).set_index('timestamp')
 
-    out_dir = os.path.join(os.path.dirname(BASE_DIR), "data")
+    out_dir = os.path.join(os.path.dirname(BASE_DIR), "data", "output")
+    if not os.path.exists(out_dir):
+        out_dir = os.path.join(os.path.dirname(BASE_DIR), "data")
     if not os.path.exists(out_dir):
         out_dir = BASE_DIR
+
 
     table_1_inbound.to_csv(os.path.join(out_dir, "table_1_workload_inbound.csv"))
     table_2_outbound.to_csv(os.path.join(out_dir, "table_2_workload_outbound.csv"))

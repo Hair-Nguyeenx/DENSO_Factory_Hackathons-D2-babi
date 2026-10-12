@@ -9,8 +9,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 
 candidate_data_paths = [
+    os.path.join(ROOT_DIR, "data", "input", "denso_logistics_simulation_test.csv"),
     os.path.join(ROOT_DIR, "data", "denso_logistics_simulation_test.csv"),
+    os.path.join(SCRIPT_DIR, "data", "input", "denso_logistics_simulation_test.csv"),
     os.path.join(SCRIPT_DIR, "data", "denso_logistics_simulation_test.csv"),
+    os.path.join("data", "input", "denso_logistics_simulation_test.csv"),
     os.path.join("data", "denso_logistics_simulation_test.csv"),
     os.path.join(ROOT_DIR, "denso_logistics_simulation_test.csv"),
     os.path.join(SCRIPT_DIR, "denso_logistics_simulation_test.csv"),
@@ -24,7 +27,10 @@ for p in candidate_data_paths:
         break
 
 if data_path is None:
-    data_path = os.path.join(ROOT_DIR, "data", "denso_logistics_simulation_test.csv")
+    data_path = os.path.join(ROOT_DIR, "data", "input", "denso_logistics_simulation_test.csv")
+    if not os.path.exists(data_path):
+        data_path = os.path.join(ROOT_DIR, "data", "denso_logistics_simulation_test.csv")
+
 
 df = pd.read_csv(data_path)
 df['timestamp'] = pd.to_datetime(df['timestamp'])

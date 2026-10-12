@@ -23,12 +23,13 @@ Hệ thống được tổ chức thành 2 tầng xử lý liên hoàn:
 | `model_inbound.pkl` | Trọng số mô hình dự báo Workload Inbound. |
 | `model_outbound.pkl` | Trọng số mô hình dự báo Workload Outbound. |
 | `model_features.pkl` | Danh sách các cột đặc trưng đầu vào tương ứng của mô hình. |
-| `data/table_1_workload_inbound.csv` | Kết quả dự báo và năng lực Inbound qua 2.160 giờ kiểm thử 2027. |
-| `data/table_2_workload_outbound.csv` | Kết quả dự báo và năng lực Outbound qua 2.160 giờ kiểm thử 2027. |
-| `data/table_3_storage_inbound.csv` | Kết quả mô phỏng tồn kho sàn Inbound qua 2.160 giờ kiểm thử 2027. |
-| `data/table_4_storage_buffer.csv` | Kết quả mô phỏng tồn kho Kitting Buffer qua 2.160 giờ kiểm thử 2027. |
-| `data/table_5_storage_outbound.csv` | Kết quả mô phỏng tồn kho sàn Outbound qua 2.160 giờ kiểm thử 2027. |
+| `data/output/table_1_workload_inbound.csv` | Kết quả dự báo và năng lực Inbound qua 2.160 giờ kiểm thử 2027. |
+| `data/output/table_2_workload_outbound.csv` | Kết quả dự báo và năng lực Outbound qua 2.160 giờ kiểm thử 2027. |
+| `data/output/table_3_storage_inbound.csv` | Kết quả mô phỏng tồn kho sàn Inbound qua 2.160 giờ kiểm thử 2027. |
+| `data/output/table_4_storage_buffer.csv` | Kết quả mô phỏng tồn kho Kitting Buffer qua 2.160 giờ kiểm thử 2027. |
+| `data/output/table_5_storage_outbound.csv` | Kết quả mô phỏng tồn kho sàn Outbound qua 2.160 giờ kiểm thử 2027. |
 | `README.md` | Tài liệu kỹ thuật của module. |
+
 
 
 ---

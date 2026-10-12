@@ -15,8 +15,11 @@ if not PRED_DIR.exists():
     BASE_DIR = PRED_DIR
 
 candidate_data_paths = [
+    BASE_DIR / "data" / "input" / "denso_logistics_simulation_test.csv",
     BASE_DIR / "data" / "denso_logistics_simulation_test.csv",
+    PRED_DIR / "data" / "input" / "denso_logistics_simulation_test.csv",
     PRED_DIR / "data" / "denso_logistics_simulation_test.csv",
+    Path("data") / "input" / "denso_logistics_simulation_test.csv",
     Path("data") / "denso_logistics_simulation_test.csv",
     BASE_DIR / "denso_logistics_simulation_test.csv",
     PRED_DIR / "denso_logistics_simulation_test.csv",
@@ -30,7 +33,10 @@ for p in candidate_data_paths:
         break
 
 if DATA_PATH is None:
-    DATA_PATH = BASE_DIR / "data" / "denso_logistics_simulation_test.csv"
+    DATA_PATH = BASE_DIR / "data" / "input" / "denso_logistics_simulation_test.csv"
+    if not DATA_PATH.exists():
+        DATA_PATH = BASE_DIR / "data" / "denso_logistics_simulation_test.csv"
+
 
 
 # Thêm PRED_DIR vào sys.path và chuyển working dir tạm thời để load đúng file pkl
